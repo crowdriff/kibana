@@ -115,41 +115,6 @@ define(function (require) {
     };
 
     /**
-     * Function to determine whether to display the legend or not
-     * Displays legend when more than one series of data present
-     *
-     * @method isLegendShown
-     * @returns {boolean}
-     */
-    Data.prototype.isLegendShown = function () {
-      var isLegend = false;
-      var visData = this.getVisData();
-      var sameSeriesLabel = true;
-      var seriesLabel;
-
-      _.forEach(visData, function countSeriesLength(obj) {
-        var rootSeries = obj.series || (obj.slices && obj.slices.children);
-        var dataLength = rootSeries ? rootSeries.length : 0;
-        var label = dataLength === 1 ? rootSeries[0].label || rootSeries[0].name : undefined;
-        var children = (obj.slices && obj.slices.children && obj.slices.children[0] && obj.slices.children[0].children);
-
-        if (!seriesLabel) {
-          seriesLabel = label;
-        }
-
-        if (seriesLabel !== label) {
-          sameSeriesLabel = false;
-        }
-
-        if (dataLength > 1 || children || !sameSeriesLabel) {
-          isLegend = true;
-        }
-      });
-
-      return isLegend;
-    };
-
-    /**
      * Returns array of chart data objects for pie data objects
      *
      * @method pieData
@@ -220,7 +185,60 @@ define(function (require) {
       var isOverlapping = (this._attr.mode === 'overlap');
 
       // Series should be an array
-      return (isHistogram || isArea && !isOverlapping && series.length > 1);
+      return (isHistogram && series.length > 1 || isArea && !isOverlapping && series.length > 1);
+    };
+
+    /**
+     * Validates that the Y axis min value defined by user input
+     * is a number.
+     *
+     * @param val {Number} Y axis min value
+     * @returns {Number} Y axis min value
+     */
+    Data.prototype.validateUserDefinedYMin = function (val) {
+      if (!_.isNumber(val)) {
+        throw new Error('validateUserDefinedYMin expects a number');
+      }
+      return val;
+    };
+
+    /**
+     * Calculates the min y value from this.dataArray
+     * for each object in the dataArray.
+     *
+     * @method getYMinValue
+     * @returns {Number} Min y axis value
+     */
+    Data.prototype.getYMinValue = function () {
+      // 0 default option
+      // custom min option - where they select the min value
+
+      var self = this;
+      var arr = [];
+      var grouped = (this._attr.mode === 'grouped');
+
+      if (this._attr.mode === 'percentage' || this._attr.mode === 'wiggle' ||
+        this._attr.mode === 'silhouette') {
+        return 0;
+      }
+
+      // When there is only one data point,
+      // the yMin should default to zero.
+      if (this.flatten()[0][0].length === 1 && this.flatten()[0][0][0].y > 0) {
+        return 0;
+      }
+
+      // Calculate the min value of the dataArray
+      // for each object in the dataArray,
+      // push the calculated y value to the initialized array (arr)
+      _.forEach(this.flatten(), function (series) {
+        if (self.shouldBeStacked(series) && !grouped) {
+          return arr.push(self.getYStackMin(series));
+        }
+        return arr.push(self.getYMin(series));
+      });
+
+      return _.min(arr);
     };
 
     /**
@@ -239,6 +257,12 @@ define(function (require) {
 
       if (self._attr.mode === 'percentage') {
         return 1;
+      }
+
+      // if there is only one data point and its less than zero,
+      // return 0 as the yMax value.
+      if (this.flatten()[0][0].length === 1 && this.flatten()[0][0][0].y < 0) {
+        return 0;
       }
 
       // for each object in the dataArray,
@@ -265,6 +289,29 @@ define(function (require) {
     };
 
     /**
+     * Calculates the smallest y stack value among all data objects
+     *
+     * @method getYStackMin
+     * @param series {Array} Array of data objects
+     * @returns {Number} Y stack max value
+     */
+    Data.prototype.getYStackMin = function (series) {
+      var isOrdered = (this.data.ordered && this.data.ordered.date);
+      var minDate = isOrdered ? this.data.ordered.min : undefined;
+      var maxDate = isOrdered ? this.data.ordered.max : undefined;
+
+      return d3.min(this.stackData(series), function (data) {
+        return d3.min(data, function (d) {
+          if (isOrdered) {
+            return (d.x >= minDate && d.x <= maxDate) ? d.y0 + d.y : undefined;
+          }
+
+          return d.y0 + d.y;
+        });
+      });
+    };
+
+    /**
      * Calculates the largest y stack value among all data objects
      *
      * @method getYStackMax
@@ -288,9 +335,32 @@ define(function (require) {
     };
 
     /**
+     * Calculates the Y domain min value
+     *
+     * @method getYMin
+     * @param series {Array} Array of data objects
+     * @returns {Number} Y domain min value
+     */
+    Data.prototype.getYMin = function (series) {
+      var isOrdered = (this.data.ordered && this.data.ordered.date);
+      var minDate = isOrdered ? this.data.ordered.min : undefined;
+      var maxDate = isOrdered ? this.data.ordered.max : undefined;
+
+      return d3.min(series, function (data) {
+        return d3.min(data, function (d) {
+          if (isOrdered) {
+            return (d.x >= minDate && d.x <= maxDate) ? d.y : undefined;
+          }
+
+          return d.y;
+        });
+      });
+    };
+
+    /**
      * Calculates the Y domain max value
      *
-     * @method getMax
+     * @method getYMax
      * @param series {Array} Array of data objects
      * @returns {Number} Y domain max value
      */
